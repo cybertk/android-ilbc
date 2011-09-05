@@ -59,7 +59,10 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := libilbc-codec
 
-LOCAL_C_INCLUDES += $(JNI_H_INCLUDE)
+LOCAL_C_INCLUDES += \
+    $(JNI_H_INCLUDE) \
+    $(codec_dir)
+
 LOCAL_SRC_FILES := ilbc-codec.c
 
 LOCAL_STATIC_LIBRARIES := libilbc
