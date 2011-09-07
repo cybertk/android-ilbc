@@ -64,6 +64,7 @@ LOCAL_C_INCLUDES += \
     $(codec_dir)
 
 LOCAL_SRC_FILES := ilbc-codec.c
+LOCAL_LDLIBS := -L$(SYSROOT)/usr/lib -llog
 
 LOCAL_STATIC_LIBRARIES := libilbc
 LOCAL_PRELINK_MODULE := false
