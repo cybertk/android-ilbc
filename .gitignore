@@ -1,2 +1,6 @@
 libs/
 obj/
+bin/
+gen
+.classpath
+.project
