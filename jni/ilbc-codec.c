@@ -28,18 +28,18 @@
 #include <utils/Log.h>
 #else
 #include <android/log.h>
+#define LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, LOG_TAG, __VA_ARGS__) 
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG  , LOG_TAG, __VA_ARGS__) 
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO   , LOG_TAG, __VA_ARGS__) 
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN   , LOG_TAG, __VA_ARGS__) 
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR  , LOG_TAG, __VA_ARGS__) 
+
 #endif
 
 #define JNI_COPY    0
 
 static iLBC_Enc_Inst_t g_enc_inst;
 static iLBC_Dec_Inst_t g_dec_inst;
-
-static void init(int mode)
-{
-    initEncode(&g_enc_inst, mode);
-    initDecode(&g_dec_inst, mode, 1);
-}
 
 static int encode(short *samples, unsigned char *data)
 {
@@ -83,7 +83,14 @@ static int decode(unsigned char *data, short *samples, int mode)
         samples[i] = point;
     }
 
-    return g_dec_inst.blockl;
+    return g_dec_inst.blockl * 2;
+}
+
+jint Java_com_googlecode_androidilbc_Codec_init(
+        JNIEnv *env, jobject this, jint mode)
+{
+    initEncode(&g_enc_inst, mode);
+    initDecode(&g_dec_inst, mode, 1);
 }
 
 /**
@@ -92,23 +99,56 @@ static int decode(unsigned char *data, short *samples, int mode)
  */
 jint Java_com_googlecode_androidilbc_Codec_encode(
         JNIEnv *env, jobject this,
-        jbyteArray sampleArray, jbyteArray dataArray)
+        jbyteArray sampleArray, jint sampleOffset, jint sampleLength,
+        jbyteArray dataArray, jint dataOffset)
 {
     jsize samples_sz, data_sz;
     jbyte *samples, *data;
-    int sz;
+    int bytes_to_encode;
+    int bytes_encoded;
+
+    LOGD("encode(%p, %d, %d, %p, %d, %d)",
+            sampleArray, sampleOffset, sampleLength,
+            dataArray, dataOffset);
 
     samples_sz = (*env)->GetArrayLength(env, sampleArray);
     samples = (*env)->GetByteArrayElements(env, sampleArray, JNI_COPY);
     data_sz= (*env)->GetArrayLength(env, dataArray);
     data = (*env)->GetByteArrayElements(env, dataArray, JNI_COPY);
 
-    sz = encode((short *)samples, data);
+    samples += sampleOffset;
+    data += dataOffset;
+
+    bytes_to_encode = sampleLength;
+    bytes_encoded = 0;
+
+    int truncated = bytes_to_encode % (g_enc_inst.blockl * 2);
+    if (!truncated) {
+        LOGW("Ignore last %d bytes", truncated);
+        bytes_to_encode -= truncated;
+    }
+
+    while (bytes_to_encode > 0) {
+
+        int _encoded;
+
+        _encoded = encode((short *)samples, data);
+
+        samples += g_enc_inst.blockl * 2;
+        data += _encoded;
+
+        bytes_encoded += _encoded;
+        bytes_to_encode -= g_enc_inst.blockl * 2;
+    }
+
+    // Revert buffer pointers
+    samples -= sampleLength;
+    data -= bytes_encoded;
 
     (*env)->ReleaseByteArrayElements(env, sampleArray, samples, JNI_COPY);
     (*env)->ReleaseByteArrayElements(env, dataArray, data, JNI_COPY);
 
-    return sz;
+    return bytes_encoded;
 }
 
 /**
@@ -117,21 +157,43 @@ jint Java_com_googlecode_androidilbc_Codec_encode(
  */
 jint Java_com_googlecode_androidilbc_Codec_decode(
         JNIEnv *env, jobject this,
-        jbyteArray dataArray, jbyteArray sampleArray)
+        jbyteArray dataArray, jint dataOffset, jint dataLength,
+        jbyteArray sampleArray, jint sampleOffset)
 {
     jsize samples_sz, data_sz;
     jbyte *samples, *data;
-    int sz;
+    int bytes_to_decode, bytes_decoded;
 
     samples_sz = (*env)->GetArrayLength(env, sampleArray);
     samples = (*env)->GetByteArrayElements(env, sampleArray, JNI_COPY);
     data_sz= (*env)->GetArrayLength(env, dataArray);
     data = (*env)->GetByteArrayElements(env, dataArray, JNI_COPY);
 
-    sz = decode(data, (short *)samples, 0);
+    samples += sampleOffset;
+    data += dataOffset;
+
+    bytes_to_decode = dataLength;
+    bytes_decoded = 0;
+
+    while (bytes_to_decode > 0) {
+
+        int _decoded;
+
+        _decoded = decode(data, (short *)samples, 1);
+
+        samples += _decoded;
+        data += g_dec_inst.no_of_bytes;
+
+        bytes_decoded += _decoded;
+        bytes_to_decode -= g_dec_inst.no_of_bytes;
+    }
+
+    // Revert buffer pointers
+    samples -= bytes_decoded;
+    data -= dataLength;
 
     (*env)->ReleaseByteArrayElements(env, sampleArray, samples, JNI_COPY);
     (*env)->ReleaseByteArrayElements(env, dataArray, data, JNI_COPY);
 
-    return sz;
+    return bytes_decoded;
 }
